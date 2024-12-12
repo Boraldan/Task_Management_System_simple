@@ -1,0 +1,28 @@
+server:
+  port: 8765
+spring:
+  application:
+    name: gateway
+  cloud:
+    gateway:
+      discovery:
+        locator:
+          enabled: true
+          lower-case-service-id: true
+      routes:
+        - id: task
+          uri: lb://TASK
+          predicates:
+            - Path=/task/**
+#          filters:
+#            - RewritePath=/task/(?<path>.*), /$\{path}
+        - id: account
+          uri: lb://ACCOUNT
+          predicates:
+            - Path=/account/**
+
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://eureka:8761/eureka

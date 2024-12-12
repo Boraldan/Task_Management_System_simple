@@ -1,0 +1,151 @@
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:latest
+    container_name: keycloak_em
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: 123
+      KC_HOSTNAME: keycloak
+      KC_HOSTNAME_STRICT: false
+      KC_PROXY: edge
+      KC_HTTP_PORT: 8080
+    command: ["start-dev","--import-realm"]
+    volumes:
+      - ./_data/keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json
+    ports:
+      - "8080:8080"
+    networks:
+      - microservices
+    extra_hosts:
+      - "keycloak:127.0.0.1"
+
+  postgres_user:
+    image: postgres:latest
+    container_name: postgres_user_em
+    environment:
+      POSTGRES_DB: postgres_user_em
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 123
+    volumes:
+      - type: volume
+        source: postgres_user_em
+        target: /var/lib/postgresql/data
+      - type: bind
+        source: ./_data/account/sql
+        target: /docker-entrypoint-initdb.d
+    ports:
+      - "15433:5432"
+    networks:
+      - microservices
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  postgres_task:
+    image: postgres:latest
+    container_name: postgres_task_em
+    environment:
+      POSTGRES_DB: postgres_task_em
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 123
+    volumes:
+      - type: volume
+        source: postgres_task_em
+        target: /var/lib/postgresql/data
+      - type: bind
+        source: ./_data/task/sql
+        target: /docker-entrypoint-initdb.d
+    ports:
+      - "15432:5432"
+    networks:
+      - microservices
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  eureka:
+    build:
+      context: ./eureka
+      dockerfile: dockerfile
+    container_name: eureka_em
+    ports:
+      - "8761:8761"
+    networks:
+      - microservices
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://eureka:8761/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  task:
+    build:
+      context: .
+      dockerfile: ./task/dockerfile
+    container_name: task_em
+    depends_on:
+      postgres_task:
+        condition: service_healthy
+      keycloak:
+        condition: service_started
+      eureka:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres_task:5432/postgres_task_em
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: 123
+      SPRING_PROFILES_ACTIVE: secret
+      KEYCLOAK_ISSUER_URI: http://keycloak:8080/realms/master
+    #      REDIRECT_URI: http://task:8082/login/oauth2/code/keycloak
+    networks:
+      - microservices
+
+  account:
+    build:
+      context: .
+      dockerfile: ./account/dockerfile
+    container_name: account_em
+    depends_on:
+      eureka:
+        condition: service_healthy
+      postgres_user:
+        condition: service_healthy
+      keycloak:
+        condition: service_started
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres_user:5432/postgres_user_em
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: 123
+      SPRING_PROFILES_ACTIVE: secret
+      KEYCLOAK_ISSUER_URI: http://keycloak:8080/realms/master
+    networks:
+      - microservices
+
+  gateway:
+    build:
+      context: ./gateway
+      dockerfile: dockerfile
+    container_name: gateway_em
+    depends_on:
+      eureka:
+        condition: service_started
+      task:
+        condition: service_started
+      account:
+        condition: service_started
+    ports:
+      - "8765:8765"
+    networks:
+      - microservices
+
+networks:
+  microservices:
+
+volumes:
+  postgres_user_em:
+  postgres_task_em:

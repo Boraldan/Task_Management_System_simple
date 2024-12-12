@@ -1,0 +1,18 @@
+FROM maven:3.9.4-eclipse-temurin-17 AS build-entity
+WORKDIR /app/entity
+COPY ../entity/pom.xml ./
+COPY ../entity/src ./src
+RUN mvn -f pom.xml clean install -DskipTests -e
+
+FROM maven:3.9.4-eclipse-temurin-17 AS build
+WORKDIR /app
+COPY --from=build-entity /app/entity/target/entity-1.0-SNAPSHOT.jar /root/.m2/repository/ru/em/entity/1.0-SNAPSHOT/entity-1.0-SNAPSHOT.jar
+WORKDIR /app
+COPY ../account/pom.xml ./
+COPY ../account/src ./src
+RUN mvn -f pom.xml clean package -DskipTests -e
+
+FROM openjdk:17
+COPY --from=build /app/target/*-SNAPSHOT.jar /app/app.jar
+ENTRYPOINT ["java", "-jar", "/app/app.jar"]
+
